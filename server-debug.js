@@ -8,10 +8,11 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'default_password';
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
 const FIREBASE_DATABASE_URL = process.env.FIREBASE_DATABASE_URL;
 
-console.log('🚀 应用启动中...');
-console.log('🔧 BOT_TOKEN 配置:', BOT_TOKEN ? '已设置' : '未设置');
-console.log('🔧 FIREBASE_API_KEY 配置:', FIREBASE_API_KEY ? '已设置' : '未设置');
-console.log('🔧 FIREBASE_DATABASE_URL 配置:', FIREBASE_DATABASE_URL ? '已设置' : '未设置');
+console.log('=== 启动配置 ===');
+console.log('BOT_TOKEN:', BOT_TOKEN ? '已设置' : '未设置');
+console.log('ADMIN_PASSWORD:', ADMIN_PASSWORD ? '已设置' : '使用默认');
+console.log('FIREBASE_API_KEY:', FIREBASE_API_KEY ? '已设置' : '未设置');
+console.log('FIREBASE_DATABASE_URL:', FIREBASE_DATABASE_URL ? '已设置' : '未设置');
 
 if (!BOT_TOKEN) {
     console.error('❌ 错误: 请设置 BOT_TOKEN 环境变量');
@@ -20,21 +21,20 @@ if (!BOT_TOKEN) {
 
 // Firebase Realtime Database 写入函数（带详细日志）
 function writeToFirebase(path, data, callback) {
-    console.log('📝 准备写入 Firebase...');
-    console.log('📝 写入路径:', path);
-    console.log('📝 写入数据:', JSON.stringify(data, null, 2));
+    console.log('=== Firebase 写入开始 ===');
+    console.log('写入路径:', path);
+    console.log('写入数据:', JSON.stringify(data, null, 2));
     
     if (!FIREBASE_API_KEY || !FIREBASE_DATABASE_URL) {
-        console.log('⚠️  Firebase 配置不完整，跳过写入');
-        callback(new Error('Firebase 配置不完整'), null);
+        console.log('Firebase 配置不完整，跳过写入');
+        callback(null, data);
         return;
     }
     
     const url = `${FIREBASE_DATABASE_URL}${path}.json?auth=${FIREBASE_API_KEY}`;
-    console.log('📝 Firebase 写入 URL:', url.replace(FIREBASE_API_KEY, '***HIDDEN***'));
-    
+    console.log('Firebase URL:', url);
     const postData = JSON.stringify(data);
-    console.log('📝 发送数据大小:', postData.length, '字节');
+    console.log('POST 数据长度:', postData.length);
     
     const options = {
         method: 'PUT',
@@ -44,28 +44,25 @@ function writeToFirebase(path, data, callback) {
         }
     };
     
-    console.log('📡 开始 Firebase 写入请求...');
+    console.log('HTTP 请求选项:', options);
     
     const req = https.request(url, options, (res) => {
-        console.log('✅ Firebase 写入响应状态:', res.statusCode);
-        console.log('✅ 响应头:', res.headers);
+        console.log('Firebase 响应状态码:', res.statusCode);
+        console.log('Firebase 响应头:', res.headers);
         
         let responseBody = '';
         res.on('data', (chunk) => {
             responseBody += chunk;
-            console.log('📥 收到响应数据块:', chunk.length, '字节');
+            console.log('收到响应数据块，长度:', chunk.length);
         });
-        
         res.on('end', () => {
-            console.log('🏁 Firebase 写入完成');
-            console.log('📄 完整响应:', responseBody);
-            
+            console.log('Firebase 完整响应:', responseBody);
             try {
-                const result = JSON.parse(responseBody);
-                console.log('✅ Firebase 写入成功!');
-                callback(null, result);
+                const parsedResponse = JSON.parse(responseBody);
+                console.log('✅ Firebase 写入成功！');
+                callback(null, parsedResponse);
             } catch (parseError) {
-                console.error('❌ 解析 Firebase 响应失败:', parseError);
+                console.error('❌ Firebase 响应解析失败:', parseError);
                 callback(parseError, null);
             }
         });
@@ -73,30 +70,30 @@ function writeToFirebase(path, data, callback) {
     
     req.on('error', (error) => {
         console.error('❌ Firebase 写入错误:', error);
-        console.error('❌ 错误详情:', error.message);
+        console.error('错误详情:', error.message);
         callback(error, null);
     });
     
     req.on('timeout', () => {
-        console.error('⏰ Firebase 写入超时');
+        console.error('❌ Firebase 请求超时');
         req.destroy();
-        callback(new Error('请求超时'), null);
+        callback(new Error('Request timeout'), null);
     });
     
     req.setTimeout(10000); // 10秒超时
     
-    console.log('📤 发送 Firebase 写入请求...');
+    console.log('发送 POST 数据...');
     req.write(postData);
     req.end();
 }
 
 // Firebase Realtime Database 读取函数（带详细日志）
 function readFromFirebase(path, callback) {
-    console.log('🔍 准备读取 Firebase...');
-    console.log('🔍 读取路径:', path);
+    console.log('=== Firebase 读取开始 ===');
+    console.log('读取路径:', path);
     
     if (!FIREBASE_API_KEY || !FIREBASE_DATABASE_URL) {
-        console.log('⚠️  Firebase 配置不完整，返回默认配置');
+        console.log('Firebase 配置不完整，返回默认配置');
         const defaultConfig = {
             welcomeMessage: "👋 欢迎使用我的机器人！",
             keywords: {
@@ -112,26 +109,22 @@ function readFromFirebase(path, callback) {
     }
     
     const url = `${FIREBASE_DATABASE_URL}${path}.json?auth=${FIREBASE_API_KEY}`;
-    console.log('🔍 Firebase 读取 URL:', url.replace(FIREBASE_API_KEY, '***HIDDEN***'));
+    console.log('Firebase 读取 URL:', url);
     
-    console.log('📡 开始 Firebase 读取请求...');
-    
-    https.get(url, (res) => {
-        console.log('✅ Firebase 读取响应状态:', res.statusCode);
-        console.log('✅ 响应头:', res.headers);
+    const req = https.get(url, (res) => {
+        console.log('Firebase 读取状态码:', res.statusCode);
+        console.log('Firebase 读取头:', res.headers);
         
         let responseBody = '';
         res.on('data', (chunk) => {
             responseBody += chunk;
-            console.log('📥 收到响应数据块:', chunk.length, '字节');
+            console.log('收到读取数据块，长度:', chunk.length);
         });
-        
         res.on('end', () => {
-            console.log('🏁 Firebase 读取完成');
-            console.log('📄 完整响应:', responseBody);
+            console.log('Firebase 读取完整响应:', responseBody);
             
-            if (responseBody === 'null') {
-                console.log('ℹ️  Firebase 中无数据，返回默认配置');
+            if (responseBody === 'null' || responseBody.trim() === '') {
+                console.log('Firebase 返回 null，使用默认配置');
                 const defaultConfig = {
                     welcomeMessage: "👋 欢迎使用我的机器人！",
                     keywords: {
@@ -145,11 +138,12 @@ function readFromFirebase(path, callback) {
                 callback(null, defaultConfig);
             } else {
                 try {
-                    const result = JSON.parse(responseBody);
-                    console.log('✅ Firebase 读取成功!');
-                    callback(null, result);
+                    const parsedResponse = JSON.parse(responseBody);
+                    console.log('✅ Firebase 读取成功！');
+                    callback(null, parsedResponse);
                 } catch (parseError) {
-                    console.error('❌ 解析 Firebase 响应失败:', parseError);
+                    console.error('❌ Firebase 读取响应解析失败:', parseError);
+                    // 返回默认配置
                     const defaultConfig = {
                         welcomeMessage: "👋 欢迎使用我的机器人！",
                         keywords: {
@@ -166,7 +160,7 @@ function readFromFirebase(path, callback) {
         });
     }).on('error', (error) => {
         console.error('❌ Firebase 读取错误:', error);
-        console.error('❌ 错误详情:', error.message);
+        console.error('错误详情:', error.message);
         // 返回默认配置
         const defaultConfig = {
             welcomeMessage: "👋 欢迎使用我的机器人！",
@@ -180,19 +174,21 @@ function readFromFirebase(path, callback) {
         };
         callback(null, defaultConfig);
     });
+    
+    req.setTimeout(10000); // 10秒超时
 }
 
 const bot = new Telegraf(BOT_TOKEN);
 
 // 动态消息处理
 bot.start((ctx) => {
-    console.log('📨 收到 /start 命令');
+    console.log('收到 /start 命令');
     readFromFirebase('/config', (error, config) => {
         if (error) {
-            console.error('❌ 读取配置失败，使用默认消息');
+            console.log('读取配置失败，使用默认欢迎消息');
             ctx.reply('👋 欢迎使用我的机器人！');
         } else {
-            console.log('✅ 使用配置中的欢迎消息');
+            console.log('使用配置的欢迎消息:', config.welcomeMessage);
             ctx.reply(config.welcomeMessage || '👋 欢迎使用我的机器人！');
         }
     });
@@ -201,11 +197,10 @@ bot.start((ctx) => {
 bot.on('message', async (ctx) => {
     if (ctx.message.text && !ctx.message.text.startsWith('/')) {
         const text = ctx.message.text.trim();
-        console.log('📨 收到消息:', text);
-        
+        console.log('收到消息:', text);
         readFromFirebase('/config', (error, config) => {
             if (error) {
-                console.error('❌ 读取配置失败，使用默认回复');
+                console.log('读取配置失败，使用默认回复');
                 ctx.reply('我收到了你的消息！发送 "按钮" 查看按钮功能。');
                 return;
             }
@@ -215,7 +210,7 @@ bot.on('message', async (ctx) => {
             if (config.keywords) {
                 for (const [keyword, reply] of Object.entries(config.keywords)) {
                     if (text.toLowerCase().includes(keyword.toLowerCase())) {
-                        console.log('✅ 匹配关键词:', keyword);
+                        console.log('匹配关键词:', keyword, '->', reply);
                         ctx.reply(reply);
                         replied = true;
                         break;
@@ -225,7 +220,7 @@ bot.on('message', async (ctx) => {
             
             // 默认回复
             if (!replied) {
-                console.log('✅ 使用默认回复');
+                console.log('使用默认回复:', config.defaultReply);
                 ctx.reply(config.defaultReply || '我收到了你的消息！发送 "按钮" 查看按钮功能。');
             }
         });
@@ -233,10 +228,10 @@ bot.on('message', async (ctx) => {
 });
 
 bot.hears('按钮', (ctx) => {
-    console.log('📨 收到 "按钮" 命令');
+    console.log('收到 "按钮" 命令');
     readFromFirebase('/config', (error, config) => {
         if (error || !config.buttons) {
-            console.error('❌ 读取按钮配置失败，使用默认按钮');
+            console.log('使用默认按钮');
             ctx.reply('点击下面的按钮：', {
                 reply_markup: {
                     inline_keyboard: [
@@ -246,7 +241,7 @@ bot.hears('按钮', (ctx) => {
                 }
             });
         } else {
-            console.log('✅ 使用配置中的按钮');
+            console.log('使用配置的按钮:', JSON.stringify(config.buttons));
             const keyboard = config.buttons.map(btn => [{ text: btn.text, url: btn.url }]);
             keyboard.push([{ text: '返回主菜单', callback_data: 'menu' }]);
             ctx.reply('点击下面的按钮：', {
@@ -259,7 +254,6 @@ bot.hears('按钮', (ctx) => {
 });
 
 bot.action('menu', (ctx) => {
-    console.log('🔄 按钮回调: menu');
     ctx.answerCbQuery();
     ctx.editMessageText('回到主菜单了！');
 });
@@ -280,7 +274,7 @@ app.get('/set-webhook', async (req, res) => {
         await bot.telegram.setWebhook(webhookUrl);
         res.send(`✅ Webhook 设置成功！`);
     } catch (error) {
-        console.error('❌ Webhook 设置失败:', error);
+        console.error('Webhook 设置失败:', error);
         res.status(500).send(`❌ Webhook 设置失败: ${error.message}`);
     }
 });
@@ -306,7 +300,6 @@ app.get('/admin', (req, res) => {
             input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
             button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
             button:hover { background: #0056b3; }
-            .debug-info { background: #f8f9fa; padding: 15px; border-radius: 4px; margin-top: 20px; font-size: 12px; }
         </style>
     </head>
     <body>
@@ -318,12 +311,7 @@ app.get('/admin', (req, res) => {
             </div>
             <button type="submit">登录</button>
         </form>
-        <div class="debug-info">
-            <strong>调试信息:</strong><br>
-            • 如果登录后看不到编辑表单，请检查 Render 日志<br>
-            • 保存配置时会显示详细日志<br>
-            • Firebase 配置状态会在日志中显示
-        </div>
+        <p><small>💡 调试版本 - 所有操作都会记录详细日志</small></p>
     </body>
     </html>
     `);
@@ -332,14 +320,16 @@ app.get('/admin', (req, res) => {
 // 后台管理 - 登录处理
 app.post('/admin/login', (req, res) => {
     const { password } = req.body;
-    console.log('🔐 尝试登录后台');
+    console.log('=== 后台登录尝试 ===');
+    console.log('输入密码:', password);
+    console.log('正确密码:', ADMIN_PASSWORD);
     
     if (password === ADMIN_PASSWORD) {
         console.log('✅ 后台登录成功');
         // 读取当前配置并显示编辑页面
         readFromFirebase('/config', (error, config) => {
             if (error) {
-                console.error('❌ 读取配置失败，使用默认配置');
+                console.log('读取配置失败，使用默认配置');
                 config = {
                     welcomeMessage: "👋 欢迎使用我的机器人！",
                     keywords: { "你好": "你好呀！很高兴见到你！😊" },
@@ -348,7 +338,7 @@ app.post('/admin/login', (req, res) => {
                 };
             }
             
-            console.log('📊 当前配置:', JSON.stringify(config, null, 2));
+            console.log('显示配置:', JSON.stringify(config, null, 2));
             
             // 格式化关键词为字符串
             let keywordsStr = '';
@@ -366,7 +356,7 @@ app.post('/admin/login', (req, res) => {
             <!DOCTYPE html>
             <html>
             <head>
-                <title>机器人管理面板</title>
+                <title>机器人管理面板 - 调试版</title>
                 <meta charset="utf-8">
                 <style>
                     body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
@@ -379,27 +369,32 @@ app.post('/admin/login', (req, res) => {
                     .logout:hover { background: #c82333; }
                     .section { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
                     h3 { margin-top: 0; }
-                    .char-counter { font-size: 12px; color: #666; margin-top: 5px; }
+                    .debug-info { background: #e9ecef; padding: 10px; border-radius: 4px; margin-top: 10px; }
                 </style>
             </head>
             <body>
-                <h2>🤖 机器人管理面板</h2>
+                <h2>🤖 机器人管理面板 - 调试版</h2>
                 <a href="/admin/logout"><button class="logout">退出登录</button></a>
+                
+                <div class="debug-info">
+                    <strong>🔧 调试信息:</strong><br>
+                    • 所有保存操作都会记录详细日志<br>
+                    • 请在保存后查看 Render 日志<br>
+                    • 如果保存失败，请复制错误信息
+                </div>
                 
                 <form action="/admin/save" method="POST">
                     <div class="section">
                         <h3>欢迎消息 (/start 命令)</h3>
                         <div class="form-group">
-                            <textarea name="welcomeMessage" rows="3" maxlength="500">${(config.welcomeMessage || '').replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-counter">最多 500 字符</div>
+                            <textarea name="welcomeMessage" rows="3">${(config.welcomeMessage || '').replace(/"/g, '&quot;')}</textarea>
                         </div>
                     </div>
                     
                     <div class="section">
                         <h3>默认回复</h3>
                         <div class="form-group">
-                            <textarea name="defaultReply" rows="2" maxlength="1000">${(config.defaultReply || '').replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-counter">最多 1000 字符</div>
+                            <textarea name="defaultReply" rows="2">${(config.defaultReply || '').replace(/"/g, '&quot;')}</textarea>
                         </div>
                     </div>
                     
@@ -407,8 +402,7 @@ app.post('/admin/login', (req, res) => {
                         <h3>关键词回复</h3>
                         <p>格式: 关键词1=回复1;关键词2=回复2</p>
                         <div class="form-group">
-                            <textarea name="keywords" rows="4" maxlength="2000">${keywordsStr.replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-counter">最多 2000 字符</div>
+                            <textarea name="keywords" rows="4">${keywordsStr.replace(/"/g, '&quot;')}</textarea>
                         </div>
                     </div>
                     
@@ -416,19 +410,12 @@ app.post('/admin/login', (req, res) => {
                         <h3>按钮设置</h3>
                         <p>格式: 文字1|链接1;文字2|链接2</p>
                         <div class="form-group">
-                            <textarea name="buttons" rows="2" maxlength="1000">${buttonsStr.replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-counter">最多 1000 字符</div>
+                            <textarea name="buttons" rows="2">${buttonsStr.replace(/"/g, '&quot;')}</textarea>
                         </div>
                     </div>
                     
                     <button type="submit">保存配置</button>
                 </form>
-                
-                <div class="section">
-                    <h3>💡 调试提示</h3>
-                    <p>保存配置后，页面会显示成功/失败消息。<br>
-                    如果保存失败，请查看 Render 日志获取详细错误信息。</p>
-                </div>
             </body>
             </html>
             `);
@@ -441,20 +428,21 @@ app.post('/admin/login', (req, res) => {
 
 // 后台管理 - 保存配置
 app.post('/admin/save', (req, res) => {
-    console.log('💾 收到保存配置请求');
+    console.log('=== 收到保存请求 ===');
+    console.log('请求体:', req.body);
+    
     const { welcomeMessage, defaultReply, keywords, buttons } = req.body;
-    console.log('💾 请求数据:', { welcomeMessage, defaultReply, keywords, buttons });
     
     // 解析关键词
     const keywordObj = {};
     if (keywords) {
-        console.log('🔍 解析关键词:', keywords);
+        console.log('解析关键词:', keywords);
         keywords.split(';').forEach(pair => {
             if (pair.trim()) {
                 const [key, value] = pair.split('=');
                 if (key && value) {
                     keywordObj[key.trim()] = value.trim();
-                    console.log('✅ 添加关键词:', key.trim(), '->', value.trim());
+                    console.log('添加关键词:', key.trim(), '->', value.trim());
                 }
             }
         });
@@ -463,13 +451,13 @@ app.post('/admin/save', (req, res) => {
     // 解析按钮
     const buttonArray = [];
     if (buttons) {
-        console.log('🔍 解析按钮:', buttons);
+        console.log('解析按钮:', buttons);
         buttons.split(';').forEach(pair => {
             if (pair.trim()) {
                 const [text, url] = pair.split('|');
                 if (text && url) {
                     buttonArray.push({ text: text.trim(), url: url.trim() });
-                    console.log('✅ 添加按钮:', text.trim(), '->', url.trim());
+                    console.log('添加按钮:', text.trim(), '->', url.trim());
                 }
             }
         });
@@ -483,7 +471,8 @@ app.post('/admin/save', (req, res) => {
         buttons: buttonArray.length > 0 ? buttonArray : [{ text: "GitHub", url: "https://github.com" }]
     };
     
-    console.log('💾 准备保存的配置:', JSON.stringify(config, null, 2));
+    console.log('=== 准备保存的完整配置 ===');
+    console.log(JSON.stringify(config, null, 2));
     
     // 保存到 Firebase
     writeToFirebase('/config', config, (error, result) => {
@@ -499,7 +488,7 @@ app.post('/admin/save', (req, res) => {
 
 // 后台管理 - 退出登录
 app.get('/admin/logout', (req, res) => {
-    console.log('🚪 后台退出登录');
+    console.log('=== 后台退出登录 ===');
     res.redirect('/admin');
 });
 
@@ -512,5 +501,5 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
     console.log(`🚀 服务器启动在端口 ${PORT}`);
     console.log(`🔐 后台管理: /admin`);
-    console.log(`📡 Webhook 端点: /webhook`);
+    console.log(`📊 调试模式: 所有操作都有详细日志`);
 });
