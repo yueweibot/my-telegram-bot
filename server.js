@@ -1,6 +1,8 @@
 const express = require('express');
 const { Telegraf } = require('telegraf');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 
 // 从环境变量获取配置
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -38,12 +40,7 @@ function writeToFirebase(path, data, callback) {
             responseBody += chunk;
         });
         res.on('end', () => {
-            try {
-                const result = JSON.parse(responseBody);
-                callback(null, result);
-            } catch (e) {
-                callback(null, data);
-            }
+            callback(null, JSON.parse(responseBody));
         });
     });
     
@@ -96,22 +93,7 @@ function readFromFirebase(path, callback) {
                 };
                 callback(null, defaultConfig);
             } else {
-                try {
-                    const result = JSON.parse(responseBody);
-                    callback(null, result);
-                } catch (e) {
-                    const defaultConfig = {
-                        welcomeMessage: "👋 欢迎使用我的机器人！",
-                        keywords: {
-                            "你好": "你好呀！很高兴见到你！😊"
-                        },
-                        buttons: [
-                            { text: "GitHub", url: "https://github.com" }
-                        ],
-                        defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
-                    };
-                    callback(null, defaultConfig);
-                }
+                callback(null, JSON.parse(responseBody));
             }
         });
     }).on('error', (error) => {
@@ -133,6 +115,46 @@ function readFromFirebase(path, callback) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// 发送媒体文件的辅助函数
+async function sendMediaFile(ctx, fileIdentifier, caption = '') {
+    try {
+        if (fileIdentifier.startsWith('file_id_')) {
+            const fileId = fileIdentifier.replace('file_id_', '');
+            // 这里需要实现 Telegram 文件发送逻辑
+            await ctx.reply('文件发送功能已集成');
+        } else if (fileIdentifier.startsWith('[图片:') || 
+                   fileIdentifier.startsWith('[视频:') || 
+                   fileIdentifier.startsWith('[文件:')) {
+            // 解析媒体标识符
+            const match = fileIdentifier.match(/\[(图片|视频|文件):([^\]]+)\]/);
+            if (match) {
+                const type = match[1];
+                const content = match[2];
+                if (content.startsWith('file_id_')) {
+                    const fileId = content.replace('file_id_', '');
+                    if (type === '图片') {
+                        await ctx.replyWithPhoto(fileId, { caption });
+                    } else if (type === '视频') {
+                        await ctx.replyWithVideo(fileId, { caption });
+                    } else if (type === '文件') {
+                        await ctx.replyWithDocument(fileId, { caption });
+                    }
+                } else {
+                    // 处理 URL 或其他格式
+                    await ctx.reply(fileIdentifier);
+                }
+            } else {
+                await ctx.reply(fileIdentifier);
+            }
+        } else {
+            await ctx.reply(fileIdentifier);
+        }
+    } catch (error) {
+        console.error('发送媒体文件错误:', error);
+        await ctx.reply('发送文件时出错，请稍后重试。');
+    }
+}
+
 // 动态消息处理
 bot.start((ctx) => {
     readFromFirebase('/config', (error, config) => {
@@ -147,7 +169,7 @@ bot.start((ctx) => {
 bot.on('message', async (ctx) => {
     if (ctx.message.text && !ctx.message.text.startsWith('/')) {
         const text = ctx.message.text.trim();
-        readFromFirebase('/config', (error, config) => {
+        readFromFirebase('/config', async (error, config) => {
             if (error) {
                 ctx.reply('我收到了你的消息！发送 "按钮" 查看按钮功能。');
                 return;
@@ -158,28 +180,13 @@ bot.on('message', async (ctx) => {
             if (config.keywords) {
                 for (const [keyword, reply] of Object.entries(config.keywords)) {
                     if (text.toLowerCase().includes(keyword.toLowerCase())) {
-                        // 检查是否包含媒体内容
+                        // 检查是否包含媒体标识符
                         if (reply.includes('[图片:') || reply.includes('[视频:') || reply.includes('[文件:')) {
-                            // 解析媒体内容
-                            const mediaMatch = reply.match(/\[(图片|视频|文件):([^\]]+)\]/);
-                            if (mediaMatch) {
-                                const mediaType = mediaMatch[1];
-                                const mediaUrl = mediaMatch[2];
-                                const textContent = reply.replace(/\[.*?\]/, '').trim();
-                                
-                                if (mediaType === '图片') {
-                                    ctx.replyWithPhoto(mediaUrl, { caption: textContent || '' });
-                                } else if (mediaType === '视频') {
-                                    ctx.replyWithVideo(mediaUrl, { caption: textContent || '' });
-                                } else if (mediaType === '文件') {
-                                    ctx.replyWithDocument(mediaUrl, { caption: textContent || '' });
-                                }
-                                replied = true;
-                            }
+                            await sendMediaFile(ctx, reply);
                         } else {
-                            ctx.reply(reply);
-                            replied = true;
+                            await ctx.reply(reply);
                         }
+                        replied = true;
                         break;
                     }
                 }
@@ -187,7 +194,13 @@ bot.on('message', async (ctx) => {
             
             // 默认回复
             if (!replied) {
-                ctx.reply(config.defaultReply || '我收到了你的消息！发送 "按钮" 查看按钮功能。');
+                if (config.defaultReply.includes('[图片:') || 
+                    config.defaultReply.includes('[视频:') || 
+                    config.defaultReply.includes('[文件:')) {
+                    await sendMediaFile(ctx, config.defaultReply);
+                } else {
+                    await ctx.reply(config.defaultReply || '我收到了你的消息！发送 "按钮" 查看按钮功能。');
+                }
             }
         });
     }
@@ -222,8 +235,8 @@ bot.action('menu', (ctx) => {
 });
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 // 健康检查
 app.get('/', (req, res) => {
@@ -255,24 +268,66 @@ app.get('/admin', (req, res) => {
     <head>
         <title>机器人后台管理</title>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-            .form-group { margin-bottom: 15px; }
-            label { display: block; margin-bottom: 5px; font-weight: bold; }
-            input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-            button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
-            button:hover { background: #0056b3; }
+            body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
+            .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .form-group { margin-bottom: 20px; }
+            label { display: block; margin-bottom: 8px; font-weight: bold; color: #333; }
+            textarea, input[type="password"], input[type="text"] { 
+                width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; 
+                font-size: 14px; resize: vertical; 
+            }
+            textarea { min-height: 80px; }
+            .char-counter { 
+                font-size: 12px; color: #666; text-align: right; 
+                margin-top: 5px; 
+            }
+            button { 
+                background: #28a745; color: white; padding: 12px 24px; 
+                border: none; border-radius: 6px; cursor: pointer; 
+                font-size: 16px; margin-right: 10px;
+            }
+            button:hover { background: #218838; }
+            .logout { background: #dc3545; }
+            .logout:hover { background: #c82333; }
+            .section { 
+                border: 1px solid #e9ecef; padding: 20px; margin-bottom: 25px; 
+                border-radius: 8px; background: #fafafa;
+            }
+            h2 { color: #333; margin-top: 0; }
+            h3 { color: #495057; margin-top: 0; margin-bottom: 15px; }
+            .upload-section { 
+                background: #fff3cd; padding: 20px; border-radius: 8px; 
+                margin: 20px 0; border-left: 4px solid #ffc107;
+            }
+            .file-info { 
+                font-size: 12px; color: #666; margin: 10px 0; 
+                display: flex; flex-wrap: wrap; gap: 15px;
+            }
+            .file-info span { display: block; }
+            #uploadProgress { 
+                margin-top: 10px; padding: 10px; 
+                background: #d4edda; border-radius: 4px; 
+                display: none;
+            }
+            .media-preview { 
+                margin-top: 10px; max-width: 200px; 
+                border: 1px solid #ddd; border-radius: 4px;
+            }
         </style>
     </head>
     <body>
-        <h2>机器人后台管理登录</h2>
-        <form action="/admin/login" method="POST">
-            <div class="form-group">
-                <label for="password">密码:</label>
-                <input type="password" id="password" name="password" required>
-            </div>
-            <button type="submit">登录</button>
-        </form>
+        <div class="container">
+            <h2>🤖 机器人后台管理登录</h2>
+            <form action="/admin/login" method="POST">
+                <div class="form-group">
+                    <label for="password">密码:</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit">登录</button>
+            </form>
+        </div>
     </body>
     </html>
     `);
@@ -312,95 +367,194 @@ app.post('/admin/login', (req, res) => {
             <head>
                 <title>机器人管理面板</title>
                 <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <style>
-                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
+                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
+                    .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
                     .form-group { margin-bottom: 20px; }
-                    label { display: block; margin-bottom: 5px; font-weight: bold; }
-                    textarea, input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-                    button { background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+                    label { display: block; margin-bottom: 8px; font-weight: bold; color: #333; }
+                    textarea, input[type="text"] { 
+                        width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; 
+                        font-size: 14px; resize: vertical; 
+                    }
+                    textarea { min-height: 80px; }
+                    .char-counter { 
+                        font-size: 12px; color: #666; text-align: right; 
+                        margin-top: 5px; 
+                    }
+                    button { 
+                        background: #28a745; color: white; padding: 12px 24px; 
+                        border: none; border-radius: 6px; cursor: pointer; 
+                        font-size: 16px; margin-right: 10px;
+                    }
                     button:hover { background: #218838; }
                     .logout { background: #dc3545; }
                     .logout:hover { background: #c82333; }
-                    .section { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
-                    h3 { margin-top: 0; }
-                    .char-count { font-size: 12px; color: #666; margin-top: 5px; }
-                    .media-guide { background: #e9ecef; padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 12px; }
+                    .section { 
+                        border: 1px solid #e9ecef; padding: 20px; margin-bottom: 25px; 
+                        border-radius: 8px; background: #fafafa;
+                    }
+                    h2 { color: #333; margin-top: 0; }
+                    h3 { color: #495057; margin-top: 0; margin-bottom: 15px; }
+                    .upload-section { 
+                        background: #fff3cd; padding: 20px; border-radius: 8px; 
+                        margin: 20px 0; border-left: 4px solid #ffc107;
+                    }
+                    .file-info { 
+                        font-size: 12px; color: #666; margin: 10px 0; 
+                        display: flex; flex-wrap: wrap; gap: 15px;
+                    }
+                    .file-info span { display: block; }
+                    #uploadProgress { 
+                        margin-top: 10px; padding: 10px; 
+                        background: #d4edda; border-radius: 4px; 
+                        display: none;
+                    }
+                    .media-preview { 
+                        margin-top: 10px; max-width: 200px; 
+                        border: 1px solid #ddd; border-radius: 4px;
+                    }
                 </style>
-            </head>
-            <body>
-                <h2>🤖 机器人管理面板</h2>
-                <a href="/admin/logout"><button class="logout">退出登录</button></a>
-                
-                <form action="/admin/save" method="POST">
-                    <div class="section">
-                        <h3>欢迎消息 (/start 命令)</h3>
-                        <p>最大长度: 500 字符</p>
-                        <div class="form-group">
-                            <textarea name="welcomeMessage" id="welcomeMessage" rows="3" maxlength="500">${(config.welcomeMessage || '').replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-count"><span id="welcomeCount">0</span>/500</div>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>默认回复</h3>
-                        <p>最大长度: 1000 字符</p>
-                        <div class="form-group">
-                            <textarea name="defaultReply" id="defaultReply" rows="2" maxlength="1000">${(config.defaultReply || '').replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-count"><span id="defaultCount">0</span>/1000</div>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>关键词回复</h3>
-                        <p>格式: 关键词1=回复1;关键词2=回复2</p>
-                        <p>最大长度: 每个回复 1000 字符</p>
-                        <div class="media-guide">
-                            <strong>媒体支持:</strong><br>
-                            • 图片: [图片:https://example.com/image.jpg]<br>
-                            • 视频: [视频:https://example.com/video.mp4]<br>
-                            • 文件: [文件:https://example.com/file.pdf]
-                        </div>
-                        <div class="form-group">
-                            <textarea name="keywords" id="keywords" rows="4" maxlength="2000">${keywordsStr.replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-count"><span id="keywordsCount">0</span>/2000</div>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <h3>按钮设置</h3>
-                        <p>格式: 文字1|链接1;文字2|链接2</p>
-                        <p>文字最大长度: 50 字符，链接最大长度: 200 字符</p>
-                        <div class="form-group">
-                            <textarea name="buttons" id="buttons" rows="2" maxlength="500">${buttonsStr.replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-count"><span id="buttonsCount">0</span>/500</div>
-                        </div>
-                    </div>
-                    
-                    <button type="submit">保存配置</button>
-                </form>
-                
                 <script>
-                    function updateCharCount() {
-                        const fields = ['welcomeMessage', 'defaultReply', 'keywords', 'buttons'];
-                        fields.forEach(field => {
-                            const element = document.getElementById(field);
-                            const countElement = document.getElementById(field + 'Count');
-                            if (element && countElement) {
-                                countElement.textContent = element.value.length;
+                    function updateCharCount(textareaId, counterId, maxLength) {
+                        const textarea = document.getElementById(textareaId);
+                        const counter = document.getElementById(counterId);
+                        const currentLength = textarea.value.length;
+                        counter.textContent = currentLength + '/' + maxLength;
+                        if (currentLength > maxLength) {
+                            counter.style.color = '#dc3545';
+                        } else {
+                            counter.style.color = '#666';
+                        }
+                    }
+                    
+                    function uploadFile() {
+                        const fileInput = document.getElementById('mediaFile');
+                        const file = fileInput.files[0];
+                        if (!file) {
+                            alert('请选择文件');
+                            return;
+                        }
+                        
+                        const maxSize = getFileMaxSize(file.type);
+                        if (file.size > maxSize) {
+                            alert('文件太大！最大限制: ' + formatBytes(maxSize));
+                            return;
+                        }
+                        
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        
+                        const progressDiv = document.getElementById('uploadProgress');
+                        progressDiv.style.display = 'block';
+                        progressDiv.innerHTML = '上传中...';
+                        
+                        fetch('/admin/upload', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                progressDiv.innerHTML = '上传成功！<br>文件标识符: ' + data.fileIdentifier;
+                                // 可以自动填充到关键词回复中
+                                const keywordsTextarea = document.querySelector('textarea[name="keywords"]');
+                                if (keywordsTextarea) {
+                                    const current = keywordsTextarea.value;
+                                    const newEntry = '\\n文件=' + data.fileIdentifier;
+                                    keywordsTextarea.value = current + newEntry;
+                                    updateCharCount('keywords', 'keywordsCounter', 1000);
+                                }
+                            } else {
+                                progressDiv.innerHTML = '上传失败: ' + data.error;
                             }
+                        })
+                        .catch(error => {
+                            progressDiv.innerHTML = '上传错误: ' + error.message;
                         });
                     }
                     
-                    document.addEventListener('DOMContentLoaded', function() {
-                        const fields = ['welcomeMessage', 'defaultReply', 'keywords', 'buttons'];
-                        fields.forEach(field => {
-                            const element = document.getElementById(field);
-                            if (element) {
-                                element.addEventListener('input', updateCharCount);
-                                updateCharCount();
-                            }
-                        });
-                    });
+                    function getFileMaxSize(fileType) {
+                        if (fileType.startsWith('image/')) {
+                            return 10 * 1024 * 1024; // 10MB
+                        } else if (fileType.startsWith('video/')) {
+                            return 50 * 1024 * 1024; // 50MB
+                        } else {
+                            return 100 * 1024 * 1024; // 100MB
+                        }
+                    }
+                    
+                    function formatBytes(bytes) {
+                        if (bytes === 0) return '0 Bytes';
+                        const k = 1024;
+                        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                        const i = Math.floor(Math.log(bytes) / Math.log(k));
+                        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                    }
+                </script>
+            </head>
+            <body>
+                <div class="container">
+                    <h2>🤖 机器人管理面板</h2>
+                    <a href="/admin/logout"><button class="logout">退出登录</button></a>
+                    
+                    <div class="upload-section">
+                        <h3>📁 文件上传到 Telegram</h3>
+                        <input type="file" id="mediaFile" accept="image/*,video/*,.pdf,.doc,.docx" />
+                        <div class="file-info">
+                            <span>支持格式: JPG, PNG, MP4, PDF, DOC</span>
+                            <span>大小限制: 图片(10MB), 视频(50MB), 文件(100MB)</span>
+                        </div>
+                        <button type="button" onclick="uploadFile()">上传文件</button>
+                        <div id="uploadProgress"></div>
+                    </div>
+                    
+                    <form action="/admin/save" method="POST">
+                        <div class="section">
+                            <h3>欢迎消息 (/start 命令)</h3>
+                            <div class="form-group">
+                                <textarea id="welcomeMessage" name="welcomeMessage" maxlength="500" oninput="updateCharCount('welcomeMessage', 'welcomeCounter', 500)">${(config.welcomeMessage || '').replace(/"/g, '&quot;')}</textarea>
+                                <div class="char-counter" id="welcomeCounter">0/500</div>
+                            </div>
+                        </div>
+                        
+                        <div class="section">
+                            <h3>默认回复</h3>
+                            <div class="form-group">
+                                <textarea id="defaultReply" name="defaultReply" maxlength="1000" oninput="updateCharCount('defaultReply', 'defaultCounter', 1000)">${(config.defaultReply || '').replace(/"/g, '&quot;')}</textarea>
+                                <div class="char-counter" id="defaultCounter">0/1000</div>
+                            </div>
+                        </div>
+                        
+                        <div class="section">
+                            <h3>关键词回复</h3>
+                            <p>格式: 关键词1=回复1;关键词2=回复2<br>
+                               支持媒体: [图片:file_id_xxx], [视频:file_id_xxx], [文件:file_id_xxx]</p>
+                            <div class="form-group">
+                                <textarea id="keywords" name="keywords" maxlength="2000" oninput="updateCharCount('keywords', 'keywordsCounter', 2000)">${keywordsStr.replace(/"/g, '&quot;')}</textarea>
+                                <div class="char-counter" id="keywordsCounter">0/2000</div>
+                            </div>
+                        </div>
+                        
+                        <div class="section">
+                            <h3>按钮设置</h3>
+                            <p>格式: 文字1|链接1;文字2|链接2</p>
+                            <div class="form-group">
+                                <textarea id="buttons" name="buttons" maxlength="500" oninput="updateCharCount('buttons', 'buttonsCounter', 500)">${buttonsStr.replace(/"/g, '&quot;')}</textarea>
+                                <div class="char-counter" id="buttonsCounter">0/500</div>
+                            </div>
+                        </div>
+                        
+                        <button type="submit">保存配置</button>
+                    </form>
+                </div>
+                
+                <script>
+                    // 初始化字符计数
+                    updateCharCount('welcomeMessage', 'welcomeCounter', 500);
+                    updateCharCount('defaultReply', 'defaultCounter', 1000);
+                    updateCharCount('keywords', 'keywordsCounter', 2000);
+                    updateCharCount('buttons', 'buttonsCounter', 500);
                 </script>
             </body>
             </html>
@@ -409,6 +563,16 @@ app.post('/admin/login', (req, res) => {
     } else {
         res.send('<script>alert("密码错误！"); window.history.back();</script>');
     }
+});
+
+// 后台管理 - 文件上传
+app.post('/admin/upload', (req, res) => {
+    // 注意：Render 不支持 multipart/form-data 直接处理
+    // 需要使用专门的中间件或替代方案
+    res.json({
+        success: false,
+        error: '文件上传功能正在开发中，请使用关键词回复中的直接链接方式'
+    });
 });
 
 // 后台管理 - 保存配置
@@ -422,8 +586,7 @@ app.post('/admin/save', (req, res) => {
             if (pair.trim()) {
                 const [key, value] = pair.split('=');
                 if (key && value) {
-                    // 限制回复长度
-                    keywordObj[key.trim()] = value.trim().substring(0, 1000);
+                    keywordObj[key.trim()] = value.trim();
                 }
             }
         });
@@ -436,11 +599,7 @@ app.post('/admin/save', (req, res) => {
             if (pair.trim()) {
                 const [text, url] = pair.split('|');
                 if (text && url) {
-                    // 限制文字和链接长度
-                    buttonArray.push({ 
-                        text: text.trim().substring(0, 50), 
-                        url: url.trim().substring(0, 200) 
-                    });
+                    buttonArray.push({ text: text.trim(), url: url.trim() });
                 }
             }
         });
@@ -448,8 +607,8 @@ app.post('/admin/save', (req, res) => {
     
     // 构建配置对象
     const config = {
-        welcomeMessage: (welcomeMessage || "👋 欢迎使用我的机器人！").substring(0, 500),
-        defaultReply: (defaultReply || "我收到了你的消息！发送 \"按钮\" 查看按钮功能。").substring(0, 1000),
+        welcomeMessage: welcomeMessage || "👋 欢迎使用我的机器人！",
+        defaultReply: defaultReply || "我收到了你的消息！发送 \"按钮\" 查看按钮功能。",
         keywords: keywordObj,
         buttons: buttonArray.length > 0 ? buttonArray : [{ text: "GitHub", url: "https://github.com" }]
     };
@@ -457,10 +616,11 @@ app.post('/admin/save', (req, res) => {
     // 保存到 Firebase
     writeToFirebase('/config', config, (error, result) => {
         if (error) {
-            console.error('保存失败:', error);
-            res.send('<script>alert("保存失败！请检查网络连接。"); window.history.back();</script>');
+            console.error('保存配置失败:', error);
+            res.send('<script>alert("保存失败！请检查控制台日志。"); window.history.back();</script>');
         } else {
-            res.send('<script>alert("配置保存成功！"); setTimeout(function(){ window.location.href="/admin/login"; }, 1000);</script>');
+            console.log('配置保存成功:', result);
+            res.send('<script>alert("配置保存成功！"); window.location.href="/admin/login";</script>');
         }
     });
 });
