@@ -38,12 +38,7 @@ function writeToFirebase(path, data, callback) {
             responseBody += chunk;
         });
         res.on('end', () => {
-            try {
-                const result = JSON.parse(responseBody);
-                callback(null, result);
-            } catch (e) {
-                callback(null, data);
-            }
+            callback(null, JSON.parse(responseBody));
         });
     });
     
@@ -78,7 +73,7 @@ function readFromFirebase(path, callback) {
     
     https.get(url, (res) => {
         let responseBody = '';
-        res.on('data', (chunk) => {
+        res.on('td', (chunk) => {
             responseBody += chunk;
         });
         res.on('end', () => {
@@ -96,22 +91,7 @@ function readFromFirebase(path, callback) {
                 };
                 callback(null, defaultConfig);
             } else {
-                try {
-                    const result = JSON.parse(responseBody);
-                    callback(null, result);
-                } catch (e) {
-                    const defaultConfig = {
-                        welcomeMessage: "👋 欢迎使用我的机器人！",
-                        keywords: {
-                            "你好": "你好呀！很高兴见到你！😊"
-                        },
-                        buttons: [
-                            { text: "GitHub", url: "https://github.com" }
-                        ],
-                        defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
-                    };
-                    callback(null, defaultConfig);
-                }
+                callback(null, JSON.parse(responseBody));
             }
         });
     }).on('error', (error) => {
@@ -133,13 +113,64 @@ function readFromFirebase(path, callback) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// 发送媒体内容的函数
+function sendMediaContent(ctx, content) {
+    // 检查是否为图片 URL
+    if (content.startsWith('image:') && content.length > 6) {
+        const imageUrl = content.substring(6).trim();
+        if (isValidUrl(imageUrl)) {
+            ctx.replyWithPhoto(imageUrl);
+            return true;
+        }
+    }
+    
+    // 检查是否为视频 URL
+    if (content.startsWith('video:') && content.length > 6) {
+        const videoUrl = content.substring(6).trim();
+        if (isValidUrl(videoUrl)) {
+            ctx.replyWithVideo(videoUrl);
+            return true;
+        }
+    }
+    
+    // 检查是否为文件 URL
+    if (content.startsWith('file:') && content.length > 5) {
+        const fileUrl = content.substring(5).trim();
+        if (isValidUrl(fileUrl)) {
+            ctx.replyWithDocument(fileUrl);
+            return true;
+        }
+    }
+    
+    // 检查是否为普通 URL（自动发送为链接预览）
+    if (isValidUrl(content)) {
+        ctx.reply(content);
+        return true;
+    }
+    
+    return false;
+}
+
+// 验证 URL 格式
+function isValidUrl(string) {
+    try {
+        new URL(string);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
 // 动态消息处理
 bot.start((ctx) => {
     readFromFirebase('/config', (error, config) => {
         if (error) {
             ctx.reply('👋 欢迎使用我的机器人！');
         } else {
-            ctx.reply(config.welcomeMessage || '👋 欢迎使用我的机器人！');
+            // 检查是否包含媒体内容
+            if (!sendMediaContent(ctx, config.welcomeMessage || '👋 欢迎使用我的机器人！')) {
+                ctx.reply(config.welcomeMessage || '👋 欢迎使用我的机器人！');
+            }
         }
     });
 });
@@ -159,27 +190,10 @@ bot.on('message', async (ctx) => {
                 for (const [keyword, reply] of Object.entries(config.keywords)) {
                     if (text.toLowerCase().includes(keyword.toLowerCase())) {
                         // 检查是否包含媒体内容
-                        if (reply.includes('[图片:') || reply.includes('[视频:') || reply.includes('[文件:')) {
-                            // 解析媒体内容
-                            const mediaMatch = reply.match(/\[(图片|视频|文件):([^\]]+)\]/);
-                            if (mediaMatch) {
-                                const mediaType = mediaMatch[1];
-                                const mediaUrl = mediaMatch[2];
-                                const textContent = reply.replace(/\[.*?\]/, '').trim();
-                                
-                                if (mediaType === '图片') {
-                                    ctx.replyWithPhoto(mediaUrl, { caption: textContent || '' });
-                                } else if (mediaType === '视频') {
-                                    ctx.replyWithVideo(mediaUrl, { caption: textContent || '' });
-                                } else if (mediaType === '文件') {
-                                    ctx.replyWithDocument(mediaUrl, { caption: textContent || '' });
-                                }
-                                replied = true;
-                            }
-                        } else {
+                        if (!sendMediaContent(ctx, reply)) {
                             ctx.reply(reply);
-                            replied = true;
                         }
+                        replied = true;
                         break;
                     }
                 }
@@ -187,7 +201,9 @@ bot.on('message', async (ctx) => {
             
             // 默认回复
             if (!replied) {
-                ctx.reply(config.defaultReply || '我收到了你的消息！发送 "按钮" 查看按钮功能。');
+                if (!sendMediaContent(ctx, config.defaultReply || '我收到了你的消息！发送 "按钮" 查看按钮功能。')) {
+                    ctx.reply(config.defaultReply || '我收到了你的消息！发送 "按钮" 查看按钮功能。');
+                }
             }
         });
     }
@@ -323,9 +339,38 @@ app.post('/admin/login', (req, res) => {
                     .logout:hover { background: #c82333; }
                     .section { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
                     h3 { margin-top: 0; }
-                    .char-count { font-size: 12px; color: #666; margin-top: 5px; }
-                    .media-guide { background: #e9ecef; padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 12px; }
+                    .char-counter { font-size: 12px; color: #666; margin-top: 5px; }
+                    .media-help { background: #e9ecef; padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 12px; }
                 </style>
+                <script>
+                    function updateCounter(textareaId, counterId, maxLength) {
+                        const textarea = document.getElementById(textareaId);
+                        const counter = document.getElementById(counterId);
+                        const currentLength = textarea.value.length;
+                        counter.textContent = currentLength + '/' + maxLength;
+                        if (currentLength > maxLength) {
+                            counter.style.color = 'red';
+                        } else {
+                            counter.style.color = '#666';
+                        }
+                    }
+                    
+                    function addMediaExample(type) {
+                        const textarea = document.getElementById('keywords');
+                        const examples = {
+                            'image': '图片示例=image:https://example.com/image.jpg',
+                            'video': '视频示例=video:https://example.com/video.mp4',
+                            'file': '文件示例=file:https://example.com/document.pdf'
+                        };
+                        const example = examples[type];
+                        if (textarea.value) {
+                            textarea.value += ';' + example;
+                        } else {
+                            textarea.value = example;
+                        }
+                        updateCounter('keywords', 'keywords-counter', 2000);
+                    }
+                </script>
             </head>
             <body>
                 <h2>🤖 机器人管理面板</h2>
@@ -334,76 +379,68 @@ app.post('/admin/login', (req, res) => {
                 <form action="/admin/save" method="POST">
                     <div class="section">
                         <h3>欢迎消息 (/start 命令)</h3>
-                        <p>最大长度: 500 字符</p>
+                        <p>支持文本、图片、视频、文件（见下方说明）</p>
                         <div class="form-group">
-                            <textarea name="welcomeMessage" id="welcomeMessage" rows="3" maxlength="500">${(config.welcomeMessage || '').replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-count"><span id="welcomeCount">0</span>/500</div>
+                            <textarea name="welcomeMessage" id="welcomeMessage" rows="3" maxlength="500" oninput="updateCounter('welcomeMessage', 'welcome-counter', 500)">${(config.welcomeMessage || '').replace(/"/g, '&quot;')}</textarea>
+                            <div class="char-counter" id="welcome-counter">0/500</div>
                         </div>
                     </div>
                     
                     <div class="section">
                         <h3>默认回复</h3>
-                        <p>最大长度: 1000 字符</p>
+                        <p>支持文本、图片、视频、文件（见下方说明）</p>
                         <div class="form-group">
-                            <textarea name="defaultReply" id="defaultReply" rows="2" maxlength="1000">${(config.defaultReply || '').replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-count"><span id="defaultCount">0</span>/1000</div>
+                            <textarea name="defaultReply" id="defaultReply" rows="2" maxlength="1000" oninput="updateCounter('defaultReply', 'default-counter', 1000)">${(config.defaultReply || '').replace(/"/g, '&quot;')}</textarea>
+                            <div class="char-counter" id="default-counter">0/1000</div>
                         </div>
                     </div>
                     
                     <div class="section">
                         <h3>关键词回复</h3>
                         <p>格式: 关键词1=回复1;关键词2=回复2</p>
-                        <p>最大长度: 每个回复 1000 字符</p>
-                        <div class="media-guide">
-                            <strong>媒体支持:</strong><br>
-                            • 图片: [图片:https://example.com/image.jpg]<br>
-                            • 视频: [视频:https://example.com/video.mp4]<br>
-                            • 文件: [文件:https://example.com/file.pdf]
-                        </div>
+                        <p><strong>媒体功能：</strong>在回复前添加前缀</p>
+                        <ul>
+                            <li><code>image:图片URL</code> - 发送图片</li>
+                            <li><code>video:视频URL</code> - 发送视频</li>
+                            <li><code>file:文件URL</code> - 发送文件</li>
+                        </ul>
+                        <button type="button" onclick="addMediaExample('image')" style="margin-right: 10px;">添加图片示例</button>
+                        <button type="button" onclick="addMediaExample('video')" style="margin-right: 10px;">添加视频示例</button>
+                        <button type="button" onclick="addMediaExample('file')">添加文件示例</button>
                         <div class="form-group">
-                            <textarea name="keywords" id="keywords" rows="4" maxlength="2000">${keywordsStr.replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-count"><span id="keywordsCount">0</span>/2000</div>
+                            <textarea name="keywords" id="keywords" rows="4" maxlength="2000" oninput="updateCounter('keywords', 'keywords-counter', 2000)">${keywordsStr.replace(/"/g, '&quot;')}</textarea>
+                            <div class="char-counter" id="keywords-counter">0/2000</div>
                         </div>
                     </div>
                     
                     <div class="section">
                         <h3>按钮设置</h3>
                         <p>格式: 文字1|链接1;文字2|链接2</p>
-                        <p>文字最大长度: 50 字符，链接最大长度: 200 字符</p>
+                        <p><strong>注意：</strong>按钮文字限制 50 字符，链接限制 200 字符</p>
                         <div class="form-group">
-                            <textarea name="buttons" id="buttons" rows="2" maxlength="500">${buttonsStr.replace(/"/g, '&quot;')}</textarea>
-                            <div class="char-count"><span id="buttonsCount">0</span>/500</div>
+                            <textarea name="buttons" id="buttons" rows="2" maxlength="500" oninput="updateCounter('buttons', 'buttons-counter', 500)">${buttonsStr.replace(/"/g, '&quot;')}</textarea>
+                            <div class="char-counter" id="buttons-counter">0/500</div>
                         </div>
                     </div>
                     
                     <button type="submit">保存配置</button>
                 </form>
                 
-                <script>
-                    function updateCharCount() {
-                        const fields = ['welcomeMessage', 'defaultReply', 'keywords', 'buttons'];
-                        fields.forEach(field => {
-                            const element = document.getElementById(field);
-                            const countElement = document.getElementById(field + 'Count');
-                            if (element && countElement) {
-                                countElement.textContent = element.value.length;
-                            }
-                        });
-                    }
-                    
-                    document.addEventListener('DOMContentLoaded', function() {
-                        const fields = ['welcomeMessage', 'defaultReply', 'keywords', 'buttons'];
-                        fields.forEach(field => {
-                            const element = document.getElementById(field);
-                            if (element) {
-                                element.addEventListener('input', updateCharCount);
-                                updateCharCount();
-                            }
-                        });
-                    });
-                </script>
+                <div class="media-help">
+                    <h4>💡 媒体功能使用说明：</h4>
+                    <p><strong>图片：</strong>回复内容以 <code>image:</code> 开头，例如：<br><code>查看图片=image:https://example.com/photo.jpg</code></p>
+                    <p><strong>视频：</strong>回复内容以 <code>video:</code> 开头，例如：<br><code>观看视频=video:https://example.com/movie.mp4</code></p>
+                    <p><strong>文件：</strong>回复内容以 <code>file:</code> 开头，例如：<br><code>下载文件=file:https://example.com/document.pdf</code></p>
+                </div>
             </body>
             </html>
+            <script>
+                // 初始化字符计数器
+                updateCounter('welcomeMessage', 'welcome-counter', 500);
+                updateCounter('defaultReply', 'default-counter', 1000);
+                updateCounter('keywords', 'keywords-counter', 2000);
+                updateCounter('buttons', 'buttons-counter', 500);
+            </script>
             `);
         });
     } else {
@@ -415,6 +452,20 @@ app.post('/admin/login', (req, res) => {
 app.post('/admin/save', (req, res) => {
     const { welcomeMessage, defaultReply, keywords, buttons } = req.body;
     
+    // 验证输入长度
+    if (welcomeMessage && welcomeMessage.length > 500) {
+        return res.send('<script>alert("欢迎消息不能超过 500 字符！"); window.history.back();</script>');
+    }
+    if (defaultReply && defaultReply.length > 1000) {
+        return res.send('<script>alert("默认回复不能超过 1000 字符！"); window.history.back();</script>');
+    }
+    if (keywords && keywords.length > 2000) {
+        return res.send('<script>alert("关键词回复不能超过 2000 字符！"); window.history.back();</script>');
+    }
+    if (buttons && buttons.length > 500) {
+        return res.send('<script>alert("按钮设置不能超过 500 字符！"); window.history.back();</script>');
+    }
+    
     // 解析关键词
     const keywordObj = {};
     if (keywords) {
@@ -422,8 +473,14 @@ app.post('/admin/save', (req, res) => {
             if (pair.trim()) {
                 const [key, value] = pair.split('=');
                 if (key && value) {
-                    // 限制回复长度
-                    keywordObj[key.trim()] = value.trim().substring(0, 1000);
+                    // 验证关键词长度
+                    if (key.trim().length > 100) {
+                        console.warn('关键词过长:', key);
+                    }
+                    if (value.trim().length > 1000) {
+                        console.warn('回复内容过长:', value);
+                    }
+                    keywordObj[key.trim()] = value.trim();
                 }
             }
         });
@@ -436,7 +493,13 @@ app.post('/admin/save', (req, res) => {
             if (pair.trim()) {
                 const [text, url] = pair.split('|');
                 if (text && url) {
-                    // 限制文字和链接长度
+                    // 验证按钮长度
+                    if (text.trim().length > 50) {
+                        console.warn('按钮文字过长:', text);
+                    }
+                    if (url.trim().length > 200) {
+                        console.warn('按钮链接过长:', url);
+                    }
                     buttonArray.push({ 
                         text: text.trim().substring(0, 50), 
                         url: url.trim().substring(0, 200) 
@@ -448,8 +511,8 @@ app.post('/admin/save', (req, res) => {
     
     // 构建配置对象
     const config = {
-        welcomeMessage: (welcomeMessage || "👋 欢迎使用我的机器人！").substring(0, 500),
-        defaultReply: (defaultReply || "我收到了你的消息！发送 \"按钮\" 查看按钮功能。").substring(0, 1000),
+        welcomeMessage: welcomeMessage ? welcomeMessage.substring(0, 500) : "👋 欢迎使用我的机器人！",
+        defaultReply: defaultReply ? defaultReply.substring(0, 1000) : "我收到了你的消息！发送 \"按钮\" 查看按钮功能。",
         keywords: keywordObj,
         buttons: buttonArray.length > 0 ? buttonArray : [{ text: "GitHub", url: "https://github.com" }]
     };
@@ -458,9 +521,10 @@ app.post('/admin/save', (req, res) => {
     writeToFirebase('/config', config, (error, result) => {
         if (error) {
             console.error('保存失败:', error);
-            res.send('<script>alert("保存失败！请检查网络连接。"); window.history.back();</script>');
+            res.send('<script>alert("保存失败！请检查网络连接和配置。"); window.history.back();</script>');
         } else {
-            res.send('<script>alert("配置保存成功！"); setTimeout(function(){ window.location.href="/admin/login"; }, 1000);</script>');
+            console.log('保存成功:', result);
+            res.send('<script>alert("配置保存成功！所有更改已生效。"); window.location.href="/admin/login";</script>');
         }
     });
 });
