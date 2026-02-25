@@ -68,6 +68,18 @@ app.get('/', (req, res) => {
   res.send('✅ Telegram 机器人运行中！');
 });
 
+// 手动设置 webhook 的路由
+app.get('/set-webhook', async (req, res) => {
+  try {
+    const webhookUrl = `${process.env.RENDER_EXTERNAL_URL || `https://${req.get('host')}`}/webhook`;
+    await bot.telegram.setWebhook(webhookUrl);
+    res.send(`✅ Webhook 设置成功！\nWebhook URL: ${webhookUrl}`);
+  } catch (error) {
+    console.error('Webhook 设置失败:', error);
+    res.status(500).send(`❌ Webhook 设置失败: ${error.message}`);
+  }
+});
+
 // Telegram Webhook 端点
 app.post('/webhook', (req, res) => {
   bot.handleUpdate(req.body);
@@ -78,5 +90,5 @@ app.post('/webhook', (req, res) => {
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 服务器启动在端口 ${PORT}`);
-  console.log(`📝 请在 Telegram @BotFather 中设置 webhook 到: https://your-render-url.onrender.com/webhook`);
+  console.log(`📝 访问 /set-webhook 来自动设置 webhook`);
 });
