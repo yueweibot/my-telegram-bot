@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 // 从环境变量获取配置
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'default_password';
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
 const FIREBASE_DATABASE_URL = process.env.FIREBASE_DATABASE_URL;
@@ -17,10 +17,55 @@ if (!BOT_TOKEN) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Firebase Realtime Database 写入函数
+// Firebase 读取函数
+function readFromFirebase(path, callback) {
+    if (!FIREBASE_API_KEY || !FIREBASE_DATABASE_URL) {
+        const defaultConfig = {
+            welcomeMessage: "👋 欢迎使用我的机器人！",
+            keywords: { "你好": "你好呀！很高兴见到你！😊" },
+            buttons: [{ text: "GitHub", url: "https://github.com" }],
+            defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
+        };
+        callback(null, defaultConfig);
+        return;
+    }
+    
+    const url = `${FIREBASE_DATABASE_URL}${path}.json?auth=${FIREBASE_API_KEY}`;
+    
+    https.get(url, (res) => {
+        let responseBody = '';
+        res.on('data', (chunk) => {
+            responseBody += chunk;
+        });
+        res.on('end', () => {
+            if (responseBody === 'null') {
+                const defaultConfig = {
+                    welcomeMessage: "👋 欢迎使用我的机器人！",
+                    keywords: { "你好": "你好呀！很高兴见到你！😊" },
+                    buttons: [{ text: "GitHub", url: "https://github.com" }],
+                    defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
+                };
+                callback(null, defaultConfig);
+            } else {
+                callback(null, JSON.parse(responseBody));
+            }
+        });
+    }).on('error', (error) => {
+        console.error('Firebase 读取错误:', error);
+        const defaultConfig = {
+            welcomeMessage: "👋 欢迎使用我的机器人！",
+            keywords: { "你好": "你好呀！很高兴见到你！😊" },
+            buttons: [{ text: "GitHub", url: "https://github.com" }],
+            defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
+        };
+        callback(null, defaultConfig);
+    });
+}
+
+// Firebase 写入函数
 function writeToFirebase(path, data, callback) {
     if (!FIREBASE_API_KEY || !FIREBASE_DATABASE_URL) {
-        console.log('⚠️ Firebase 配置不完整，跳过写入');
+        console.log('Firebase 配置不完整，跳过写入');
         callback(null, data);
         return;
     }
@@ -42,13 +87,7 @@ function writeToFirebase(path, data, callback) {
             responseBody += chunk;
         });
         res.on('end', () => {
-            try {
-                const result = JSON.parse(responseBody);
-                callback(null, result);
-            } catch (error) {
-                console.error('Firebase 响应解析错误:', error);
-                callback(error, null);
-            }
+            callback(null, JSON.parse(responseBody));
         });
     });
     
@@ -61,94 +100,19 @@ function writeToFirebase(path, data, callback) {
     req.end();
 }
 
-// Firebase Realtime Database 读取函数
-function readFromFirebase(path, callback) {
-    if (!FIREBASE_API_KEY || !FIREBASE_DATABASE_URL) {
-        console.log('⚠️ Firebase 配置不完整，返回默认配置');
-        const defaultConfig = {
-            welcomeMessage: "👋 欢迎使用我的机器人！",
-            keywords: {
-                "你好": "你好呀！很高兴见到你！😊"
-            },
-            buttons: [
-                { text: "GitHub", url: "https://github.com" }
-            ],
-            defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
-        };
-        callback(null, defaultConfig);
-        return;
-    }
-    
-    const url = `${FIREBASE_DATABASE_URL}${path}.json?auth=${FIREBASE_API_KEY}`;
-    
-    https.get(url, (res) => {
-        let responseBody = '';
-        res.on('data', (chunk) => {
-            responseBody += chunk;
-        });
-        res.on('end', () => {
-            if (responseBody === 'null') {
-                console.log('Firebase 返回 null，使用默认配置');
-                const defaultConfig = {
-                    welcomeMessage: "👋 欢迎使用我的机器人！",
-                    keywords: {
-                        "你好": "你好呀！很高兴见到你！😊"
-                    },
-                    buttons: [
-                        { text: "GitHub", url: "https://github.com" }
-                    ],
-                    defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
-                };
-                callback(null, defaultConfig);
-            } else {
-                try {
-                    const result = JSON.parse(responseBody);
-                    callback(null, result);
-                } catch (error) {
-                    console.error('Firebase 响应解析错误:', error);
-                    const defaultConfig = {
-                        welcomeMessage: "👋 欢迎使用我的机器人！",
-                        keywords: {
-                            "你好": "你好呀！很高兴见到你！😊"
-                        },
-                        buttons: [
-                            { text: "GitHub", url: "https://github.com" }
-                        ],
-                        defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
-                    };
-                    callback(null, defaultConfig);
-                }
-            }
-        });
-    }).on('error', (error) => {
-        console.error('Firebase 读取错误:', error);
-        const defaultConfig = {
-            welcomeMessage: "👋 欢迎使用我的机器人！",
-            keywords: {
-                "你好": "你好呀！很高兴见到你！😊"
-            },
-            buttons: [
-                { text: "GitHub", url: "https://github.com" }
-            ],
-            defaultReply: "我收到了你的消息！发送 \"按钮\" 查看按钮功能。"
-        };
-        callback(null, defaultConfig);
-    });
-}
-
-// 发送媒体消息
-async function sendMediaMessage(ctx, mediaType, mediaUrl) {
+// 处理媒体消息
+function sendMediaMessage(ctx, mediaType, mediaUrl) {
     try {
         if (mediaType === '图片') {
-            await ctx.replyWithPhoto(mediaUrl);
+            ctx.replyWithPhoto(mediaUrl);
         } else if (mediaType === '视频') {
-            await ctx.replyWithVideo(mediaUrl);
+            ctx.replyWithVideo(mediaUrl);
         } else if (mediaType === '文件') {
-            await ctx.replyWithDocument(mediaUrl);
+            ctx.replyWithDocument(mediaUrl);
         }
     } catch (error) {
         console.error('发送媒体消息失败:', error);
-        ctx.reply('抱歉，无法发送该媒体内容。');
+        ctx.reply('抱歉，无法发送该媒体文件。');
     }
 }
 
@@ -166,7 +130,7 @@ bot.start((ctx) => {
 bot.on('message', async (ctx) => {
     if (ctx.message.text && !ctx.message.text.startsWith('/')) {
         const text = ctx.message.text.trim();
-        readFromFirebase('/config', async (error, config) => {
+        readFromFirebase('/config', (error, config) => {
             if (error) {
                 ctx.reply('我收到了你的消息！发送 "按钮" 查看按钮功能。');
                 return;
@@ -179,29 +143,37 @@ bot.on('message', async (ctx) => {
                     if (text.toLowerCase().includes(keyword.toLowerCase())) {
                         // 检查是否包含媒体标签
                         if (reply.includes('[图片:') || reply.includes('[视频:') || reply.includes('[文件:')) {
-                            // 处理媒体标签
-                            let replyText = reply;
+                            // 提取媒体信息
                             const mediaRegex = /\[(图片|视频|文件):([^\]]+)\]/g;
                             let match;
-                            const mediaPromises = [];
+                            const parts = [];
+                            let lastIndex = 0;
                             
                             while ((match = mediaRegex.exec(reply)) !== null) {
-                                const mediaType = match[1];
-                                const mediaUrl = match[2];
-                                mediaPromises.push(sendMediaMessage(ctx, mediaType, mediaUrl));
-                                replyText = replyText.replace(match[0], '');
+                                // 添加文本部分
+                                if (match.index > lastIndex) {
+                                    parts.push({ type: 'text', content: reply.substring(lastIndex, match.index) });
+                                }
+                                // 添加媒体部分
+                                parts.push({ type: 'media', mediaType: match[1], url: match[2] });
+                                lastIndex = match.index + match[0].length;
                             }
                             
-                            if (mediaPromises.length > 0) {
-                                await Promise.all(mediaPromises);
-                                if (replyText.trim()) {
-                                    await ctx.reply(replyText.trim());
+                            // 添加剩余文本
+                            if (lastIndex < reply.length) {
+                                parts.push({ type: 'text', content: reply.substring(lastIndex) });
+                            }
+                            
+                            // 发送消息
+                            for (const part of parts) {
+                                if (part.type === 'text' && part.content.trim()) {
+                                    await ctx.reply(part.content);
+                                } else if (part.type === 'media') {
+                                    sendMediaMessage(ctx, part.mediaType, part.url);
                                 }
-                            } else {
-                                await ctx.reply(reply);
                             }
                         } else {
-                            await ctx.reply(reply);
+                            ctx.reply(reply);
                         }
                         replied = true;
                         break;
@@ -246,16 +218,8 @@ bot.action('menu', (ctx) => {
 });
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// 文件上传中间件
-const multer = require('multer');
-const upload = multer({ 
-    limits: {
-        fileSize: 100 * 1024 * 1024 // 100MB
-    }
-});
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 // 健康检查
 app.get('/', (req, res) => {
@@ -315,7 +279,6 @@ app.post('/admin/login', (req, res) => {
     const { password } = req.body;
     
     if (password === ADMIN_PASSWORD) {
-        // 读取当前配置并显示编辑页面
         readFromFirebase('/config', (error, config) => {
             if (error) {
                 config = {
@@ -326,13 +289,11 @@ app.post('/admin/login', (req, res) => {
                 };
             }
             
-            // 格式化关键词为字符串
             let keywordsStr = '';
             if (config.keywords) {
                 keywordsStr = Object.entries(config.keywords).map(([k,v]) => `${k}=${v}`).join(';');
             }
             
-            // 格式化按钮为字符串
             let buttonsStr = '';
             if (config.buttons) {
                 buttonsStr = config.buttons.map(btn => `${btn.text}|${btn.url}`).join(';');
@@ -355,78 +316,60 @@ app.post('/admin/login', (req, res) => {
                     .logout:hover { background: #c82333; }
                     .section { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
                     h3 { margin-top: 0; }
-                    .char-counter { font-size: 12px; color: #666; margin-top: 5px; }
+                    .upload-section { background: #f8f9fa; padding: 15px; border-radius: 4px; margin-top: 20px; }
+                    .upload-section h3 { margin-top: 0; }
+                    .upload-section p { margin: 5px 0; color: #666; }
                 </style>
             </head>
             <body>
                 <h2>🤖 机器人管理面板</h2>
                 <a href="/admin/logout"><button class="logout">退出登录</button></a>
                 
-                <div class="section">
-                    <h3>💡 媒体功能说明</h3>
-                    <p>在关键词回复中使用以下格式：</p>
-                    <ul>
-                        <li><strong>图片</strong>: [图片:https://example.com/image.jpg]</li>
-                        <li><strong>视频</strong>: [视频:https://example.com/video.mp4]</li>
-                        <li><strong>文件</strong>: [文件:https://example.com/file.pdf]</li>
-                    </ul>
-                    <p><em>上传功能正在开发中，请先使用直接链接方式。</em></p>
-                </div>
-                
                 <form action="/admin/save" method="POST">
                     <div class="section">
-                        <h3>欢迎消息 (/start 命令) <span class="char-counter"><span id="welcomeCounter">0</span>/500</span></h3>
+                        <h3>欢迎消息 (/start 命令)</h3>
                         <div class="form-group">
-                            <textarea name="welcomeMessage" id="welcomeMessage" rows="3" maxlength="500">${(config.welcomeMessage || '').replace(/"/g, '&quot;')}</textarea>
+                            <textarea name="welcomeMessage" rows="3" maxlength="500">${(config.welcomeMessage || '').replace(/"/g, '&quot;')}</textarea>
+                            <small>最多 500 字符</small>
                         </div>
                     </div>
                     
                     <div class="section">
-                        <h3>默认回复 <span class="char-counter"><span id="defaultCounter">0</span>/1000</span></h3>
+                        <h3>默认回复</h3>
                         <div class="form-group">
-                            <textarea name="defaultReply" id="defaultReply" rows="2" maxlength="1000">${(config.defaultReply || '').replace(/"/g, '&quot;')}</textarea>
+                            <textarea name="defaultReply" rows="2" maxlength="1000">${(config.defaultReply || '').replace(/"/g, '&quot;')}</textarea>
+                            <small>最多 1000 字符</small>
                         </div>
                     </div>
                     
                     <div class="section">
-                        <h3>关键词回复 <span class="char-counter"><span id="keywordsCounter">0</span>/2000</span></h3>
+                        <h3>关键词回复</h3>
                         <p>格式: 关键词1=回复1;关键词2=回复2</p>
+                        <p>媒体支持: [图片:URL], [视频:URL], [文件:URL]</p>
                         <div class="form-group">
-                            <textarea name="keywords" id="keywords" rows="4" maxlength="2000">${keywordsStr.replace(/"/g, '&quot;')}</textarea>
+                            <textarea name="keywords" rows="4" maxlength="2000">${keywordsStr.replace(/"/g, '&quot;')}</textarea>
+                            <small>最多 2000 字符</small>
                         </div>
                     </div>
                     
                     <div class="section">
-                        <h3>按钮设置 <span class="char-counter"><span id="buttonsCounter">0</span>/500</span></h3>
+                        <h3>按钮设置</h3>
                         <p>格式: 文字1|链接1;文字2|链接2</p>
                         <div class="form-group">
-                            <textarea name="buttons" id="buttons" rows="2" maxlength="500">${buttonsStr.replace(/"/g, '&quot;')}</textarea>
+                            <textarea name="buttons" rows="2" maxlength="500">${buttonsStr.replace(/"/g, '&quot;')}</textarea>
+                            <small>最多 500 字符</small>
                         </div>
+                    </div>
+                    
+                    <div class="upload-section">
+                        <h3>📁 文件上传（开发中）</h3>
+                        <p>⚠️ 文件上传功能正在开发中，请使用关键词回复中的直接链接方式</p>
+                        <p>✅ 支持格式: [图片:https://...], [视频:https://...], [文件:https://...]</p>
+                        <p>📋 示例: 产品图片=[图片:https://example.com/image.jpg]</p>
                     </div>
                     
                     <button type="submit">保存配置</button>
                 </form>
-                
-                <script>
-                    function updateCounter(textareaId, counterId, maxLength) {
-                        const textarea = document.getElementById(textareaId);
-                        const counter = document.getElementById(counterId);
-                        counter.textContent = textarea.value.length;
-                        
-                        textarea.addEventListener('input', () => {
-                            counter.textContent = textarea.value.length;
-                            if (textarea.value.length > maxLength) {
-                                textarea.value = textarea.value.substring(0, maxLength);
-                                counter.textContent = maxLength;
-                            }
-                        });
-                    }
-                    
-                    updateCounter('welcomeMessage', 'welcomeCounter', 500);
-                    updateCounter('defaultReply', 'defaultCounter', 1000);
-                    updateCounter('keywords', 'keywordsCounter', 2000);
-                    updateCounter('buttons', 'buttonsCounter', 500);
-                </script>
             </body>
             </html>
             `);
@@ -440,7 +383,6 @@ app.post('/admin/login', (req, res) => {
 app.post('/admin/save', (req, res) => {
     const { welcomeMessage, defaultReply, keywords, buttons } = req.body;
     
-    // 解析关键词
     const keywordObj = {};
     if (keywords) {
         keywords.split(';').forEach(pair => {
@@ -453,7 +395,6 @@ app.post('/admin/save', (req, res) => {
         });
     }
     
-    // 解析按钮
     const buttonArray = [];
     if (buttons) {
         buttons.split(';').forEach(pair => {
@@ -466,7 +407,6 @@ app.post('/admin/save', (req, res) => {
         });
     }
     
-    // 构建配置对象
     const config = {
         welcomeMessage: welcomeMessage || "👋 欢迎使用我的机器人！",
         defaultReply: defaultReply || "我收到了你的消息！发送 \"按钮\" 查看按钮功能。",
@@ -474,13 +414,11 @@ app.post('/admin/save', (req, res) => {
         buttons: buttonArray.length > 0 ? buttonArray : [{ text: "GitHub", url: "https://github.com" }]
     };
     
-    // 保存到 Firebase
     writeToFirebase('/config', config, (error, result) => {
         if (error) {
-            console.error('保存配置失败:', error);
-            res.send('<script>alert("保存失败！请查看日志。"); window.history.back();</script>');
+            console.error('保存失败:', error);
+            res.send('<script>alert("保存失败！请检查配置。"); window.history.back();</script>');
         } else {
-            console.log('配置保存成功:', result);
             res.send('<script>alert("配置保存成功！"); window.location.href="/admin/login";</script>');
         }
     });
