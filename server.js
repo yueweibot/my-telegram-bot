@@ -6,6 +6,7 @@ const path = require('path');
 
 // 从环境变量获取配置
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const ADMIN_ID = process.env.ADMIN_ID || '8604144287'; // 你的 Telegram User ID
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'default_password';
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
 const FIREBASE_DATABASE_URL = process.env.FIREBASE_DATABASE_URL;
@@ -496,8 +497,121 @@ app.get('/admin/login', (req, res) => {
     res.redirect('/admin');
 });
 
+// ===== 代理功能配置 =====
+// 请在环境变量中设置 ADMIN_TELEGRAM_ID
+const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
+
+// 存储对话映射 (message_id -> user_id)
+const conversationMap = new Map();
+
+// 消息转发处理
+bot.on('message', async (ctx) => {
+    // 跳过命令消息和 bot 自己的消息
+    if (ctx.message.text && ctx.message.text.startsWith('/')) {
+        return;
+    }
+    
+    if (ctx.from.is_bot) {
+        return;
+    }
+    
+    const userId = ctx.from.id.toString();
+    const message = ctx.message;
+    
+    try {
+        if (ADMIN_TELEGRAM_ID && userId === ADMIN_TELEGRAM_ID) {
+            // 管理员发送的消息 - 转发给目标用户
+            if (message.reply_to_message) {
+                const replyText = message.reply_to_message.text || '';
+                // 从回复消息中提取用户ID
+                const userMatch = replyText.match(/👤 用户 \((\d+)\):/);
+                if (userMatch) {
+                    const targetUserId = userMatch[1];
+                    await ctx.telegram.sendMessage(targetUserId, message.text);
+                    console.log(`📤 管理员消息转发给用户 ${targetUserId}`);
+                }
+            }
+        } else {
+            // 普通用户发送的消息 - 转发给管理员
+            if (ADMIN_TELEGRAM_ID) {
+                const forwarded = await ctx.telegram.sendMessage(
+                    ADMIN_TELEGRAM_ID,
+                    `👤 用户 (${userId}):\n${message.text}`,
+                    { 
+                        reply_to_message_id: message.message_id,
+                        allow_sending_without_reply: true
+                    }
+                );
+                // 记录对话映射
+                conversationMap.set(forwarded.message_id.toString(), userId);
+                console.log(`📥 收到用户 ${userId} 的消息，已转发给管理员`);
+            } else {
+                // 如果没有设置管理员ID，使用默认回复
+                readFromFirebase('/config', async (error, config) => {
+                    if (error) {
+                        ctx.reply('我收到了你的消息！发送 "按钮" 查看按钮功能。');
+                        return;
+                    }
+                    
+                    let replied = false;
+                    // 检查关键词
+                    if (config.keywords) {
+                        for (const [keyword, reply] of Object.entries(config.keywords)) {
+                            if (text.toLowerCase().includes(keyword.toLowerCase())) {
+                                // 检查是否包含媒体标签
+                                if (reply.includes('[图片:') || reply.includes('[视频:') || reply.includes('[文件:')) {
+                                    // 处理媒体标签
+                                    let replyText = reply;
+                                    const mediaRegex = /\[(图片|视频|文件):([^\]]+)\]/g;
+                                    let match;
+                                    const mediaPromises = [];
+                                    
+                                    while ((match = mediaRegex.exec(reply)) !== null) {
+                                        const mediaType = match[1];
+                                        const mediaUrl = match[2];
+                                        mediaPromises.push(sendMediaMessage(ctx, mediaType, mediaUrl));
+                                        replyText = replyText.replace(match[0], '');
+                                    }
+                                    
+                                    if (mediaPromises.length > 0) {
+                                        await Promise.all(mediaPromises);
+                                        if (replyText.trim()) {
+                                            await ctx.reply(replyText.trim());
+                                        }
+                                    } else {
+                                        await ctx.reply(reply);
+                                    }
+                                } else {
+                                    await ctx.reply(reply);
+                                }
+                                replied = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 默认回复
+                    if (!replied) {
+                        ctx.reply(config.defaultReply || '我收到了你的消息！发送 "按钮" 查看按钮功能。');
+                    }
+                });
+            }
+        }
+    } catch (error) {
+        console.error('消息转发错误:', error);
+        if (userId !== ADMIN_TELEGRAM_ID) {
+            ctx.reply('抱歉，消息转发出现问题，请稍后再试。');
+        }
+    }
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
     console.log(`🚀 服务器启动在端口 ${PORT}`);
     console.log(`🔐 后台管理: /admin`);
+    if (ADMIN_TELEGRAM_ID) {
+        console.log(`👥 代理模式: 已启用 (管理员ID: ${ADMIN_TELEGRAM_ID})`);
+    } else {
+        console.log('🤖 自动回复模式: 未设置管理员ID');
+    }
 });
