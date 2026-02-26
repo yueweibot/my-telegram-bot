@@ -4,7 +4,7 @@ const { Telegraf, Markup } = require('telegraf');
 const https = require('https');
 
 // 配置你的 Bot Token
-const BOT_TOKEN = '8237145457:AAFyADU5nz4eyS0G950rH5hBRn1BvVhMBHc';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8237145457:AAFyADU5nz4eyS0G950rH5hBRn1BvVhMBHc';
 
 // 创建机器人实例
 const bot = new Telegraf(BOT_TOKEN, {
